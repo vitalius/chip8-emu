@@ -19,14 +19,6 @@ function loadRom(name) {
         });
 }
 
-var keyMap = {
-    "Digit1": "1", "Digit2": "2", "Digit3": "3", "Digit4": "C",
-    "Digit5": "4", "Digit6": "5", "Digit7": "6", "Digit8": "D",
-    "Digit9": "7", "Digit0": "8",
-    "KeyA": "9", "KeyB": "0", "KeyC": "A", "KeyD": "B",
-    "KeyE": "C", "KeyF": "D"
-};
-
 var canvas;
 var ctx;
 var lastTime;

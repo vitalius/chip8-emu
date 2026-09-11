@@ -10,6 +10,7 @@ DOM dependencies, and is covered by unit tests.
 | `chip8-core.js` | Emulation core: CPU state and opcode interpreter. No DOM. |
 | `rom.js` | ROM loader: reads `.ch8` files from `roms/` (fetch in the browser, fs in Node). |
 | `roms/` | Sample ROMs (`.ch8` binary files). |
+| `keymap.js` | Maps physical `KeyboardEvent.code`s (number row, numpad, `A`–`F`) to the 16 Chip-8 key names. |
 | `chip8.js` | Browser frontend: canvas rendering, keyboard input, 60 Hz step loop (2×/10×/100×). |
 | `chip8-core.test.js` | Unit tests for the core (Node built-in test runner). |
 | `index.html`, `chip8.css` | Browser UI (64×32 canvas + instruction log). |
@@ -71,8 +72,8 @@ shows a sample of the executed instructions).
 Serve the directory (e.g. `npx http-server`) and open the page in a browser —
 ROMs are loaded with `fetch`, so opening `index.html` via `file://` won't
 work. The `#rom-select` dropdown picks which ROM from `roms/` to run;
-choosing one loads and resets the machine. Keys: number row `1`–`0` and
-letters `A`–`F` (mapping in `keyMap` in `chip8.js`); `R` resets the machine.
+choosing one loads and resets the machine. Keys: number row `1`–`0`, numpad `1`–`0`, and
+letters `A`–`F` (mapping in `keyMap` in `keymap.js`); `R` resets the machine.
 
 ### Tests
 
@@ -81,7 +82,7 @@ npm test        # runs node --test over *.test.js
 node --test     # equivalent, no npm needed
 ```
 
-70 unit tests cover every opcode group (including VF carry/borrow/shift
+Unit tests cover every opcode group (including VF carry/borrow/shift
 flags), PC math for all skip/jump/call opcodes, sprite drawing and XOR
 collision, key handling, timers, `step()` mechanics, loading the ROM files
 from `roms/`, and a seeded end-to-end run of `maze1.ch8` (`Math.random`
