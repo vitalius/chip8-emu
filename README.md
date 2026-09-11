@@ -3,6 +3,8 @@
 Building a simple Chip-8 emulator in JavaScript. The emulation core has no
 DOM dependencies, and is covered by unit tests.
 
+See it in action [https://home.cloudmotion.com/chip8/](https://home.cloudmotion.com/chip8/)
+
 ## Files
 
 | File | Role |
