@@ -1,9 +1,24 @@
+<!DOCTYPE html>
 <html>
-<link rel="stylesheet" type="text/css" href="chip8.css">
+<head>
+	<meta charset="utf-8">
+	<title>Chip-8 Emulator</title>
+	<link rel="stylesheet" type="text/css" href="chip8.css">
+</head>
 <body>
 	<p id="debug"></p>
-	<canvas id="output"></canvas>
+	<canvas id="output" width="64" height="32"></canvas>
+	<p id="controls">
+		<select id="rom-select"></select>
+		<select id="speed-select"></select>
+		<button id="btn-run">Run</button>
+		<button id="btn-pause">Pause</button>
+		<button id="btn-step">Step</button>
+		<button id="btn-reset">Reset</button>
+	</p>
 	<p id="log"></p>
 </body>
+<script src="rom.js"></script>
+<script src="chip8-core.js"></script>
 <script src="chip8.js"></script>
 </html>

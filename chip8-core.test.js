@@ -1,0 +1,625 @@
+var test = require('node:test');
+var assert = require('node:assert/strict');
+
+var Chip8 = require('./chip8-core.js');
+var roms = require('./rom.js');
+
+function makeCpu() {
+    return new Chip8();
+}
+
+function setWord(cpu, addr, word) {
+    cpu.memory[addr] = (word >> 8) & 0xff;
+    cpu.memory[addr + 1] = word & 0xff;
+}
+
+function loadWords(cpu, words) {
+    for (var i = 0; i < words.length; i++)
+        setWord(cpu, 0x200 + i * 2, words[i]);
+}
+
+function screenPixels(cpu) {
+    var n = 0;
+    for (var i = 0; i < cpu.screen.length; i++)
+        n += cpu.screen[i];
+    return n;
+}
+
+function withRandom(value, fn) {
+    var original = Math.random;
+    Math.random = function () { return value; };
+    try {
+        return fn();
+    } finally {
+        Math.random = original;
+    }
+}
+
+test("reset() / loadRom()", (t) => {
+    t.test("initialises CPU state", () => {
+        var cpu = makeCpu();
+        assert.equal(cpu.pc, 0x200);
+        assert.equal(cpu.I, 0);
+        assert.equal(cpu.sp, 0);
+        assert.equal(cpu.delayTimer, 0);
+        assert.equal(cpu.soundTimer, 0);
+        assert.equal(cpu.waitingForKey, false);
+        assert.equal(screenPixels(cpu), 0);
+        cpu.V.forEach(function (v) { assert.equal(v, 0); });
+        assert.equal(cpu.stack.length, 16);
+    });
+
+    t.test("loads font sprites at 0x50", () => {
+        var cpu = makeCpu();
+        assert.equal(cpu.memory[0x50], 0x1c); // '0' row 0
+        assert.equal(cpu.memory[0x51], 0x22); // '0' row 1
+        assert.equal(cpu.memory[0x54], 0x1c); // '0' row 4
+        assert.equal(cpu.memory[0x55], 0x04); // '1' row 0
+        assert.equal(cpu.memory[0x5e], 0x1e); // '2' row 4
+    });
+
+    t.test("loadRom() writes bytes at 0x200", () => {
+        var cpu = makeCpu();
+        cpu.loadRom([0xab, 0xcd, 0xef]);
+        assert.equal(cpu.memory[0x200], 0xab);
+        assert.equal(cpu.memory[0x201], 0xcd);
+        assert.equal(cpu.memory[0x202], 0xef);
+    });
+
+    t.test("reset(rom) reloads a rom", () => {
+        var cpu = makeCpu();
+        cpu.loadRom([0x11]);
+        cpu.reset([0x22]);
+        assert.equal(cpu.memory[0x200], 0x22);
+        assert.equal(cpu.pc, 0x200);
+    });
+});
+
+test("rom.js loads ROM files from the roms directory", () => {
+    assert.deepEqual(roms.ROMS, ['maze1.ch8', 'maze2.ch8', 'particle.ch8', 'sierpinski.ch8']);
+    assert.equal(roms.DEFAULT_ROM, 'maze1.ch8');
+    var maze1 = roms.loadRomFile('maze1.ch8');
+    assert.equal(maze1.length, 38);
+    assert.deepEqual(maze1.slice(0, 6), new Uint8Array([0x60, 0x00, 0x61, 0x00, 0xa2, 0x22]));
+    roms.ROMS.forEach(function (name) {
+        var bytes = roms.loadRomFile(name);
+        assert.ok(bytes.length > 0, name + " is empty");
+        assert.ok(bytes.length <= 4096 - 0x200, name + " does not fit in memory");
+    });
+});
+
+test("00E0 / 2NNN / 00EE", (t) => {
+    t.test("00E0 clears the screen", () => {
+        var cpu = makeCpu();
+        cpu.screen[0] = 1;
+        cpu.screen[123] = 1;
+        cpu.run(0x00e0);
+        assert.equal(screenPixels(cpu), 0);
+    });
+
+    t.test("2NNN / 00EE call and return round-trip", () => {
+        var cpu = makeCpu();
+        setWord(cpu, 0x200, 0x2300);
+        setWord(cpu, 0x300, 0x00ee);
+        cpu.step();
+        assert.equal(cpu.sp, 1);
+        assert.equal(cpu.stack[0], 0x202);
+        assert.equal(cpu.pc, 0x300);
+        cpu.step();
+        assert.equal(cpu.sp, 0);
+        assert.equal(cpu.pc, 0x202);
+    });
+
+    t.test("stack wraps around at 16 entries", () => {
+        var cpu = makeCpu();
+        cpu.sp = 15;
+        cpu.run(0x2300);
+        assert.equal(cpu.sp, 0);
+        assert.equal(cpu.stack[15], 0x202); // written before sp wraps
+    });
+});
+
+test("1NNN / 2NNN / BNNN", (t) => {
+    t.test("1NNN jumps and holds pc", () => {
+        var cpu = makeCpu();
+        loadWords(cpu, [0x1234]);
+        var line = cpu.step();
+        assert.equal(cpu.pc, 0x234);
+        assert.ok(line.indexOf("Jumps to address 234") !== -1);
+    });
+
+    t.test("2NNN pushes return address and jumps", () => {
+        var cpu = makeCpu();
+        cpu.pc = 0x210;
+        cpu.run(0x2200);
+        assert.equal(cpu.pc, 0x200);
+        assert.equal(cpu.pcHeld, true);
+        assert.equal(cpu.sp, 1);
+        assert.equal(cpu.stack[0], 0x212);
+    });
+
+    t.test("BNNN jumps to NNN + V0", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 5;
+        cpu.run(0xb200);
+        assert.equal(cpu.pc, 0x205);
+    });
+
+    t.test("BNNN result wraps through step() pc masking", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 0xff;
+        loadWords(cpu, [0xbfff]);
+        cpu.step();
+        assert.equal(cpu.pc, 0x10fe); // NNN + V0 = 0xfff + 0xff
+        cpu.step(); // masks pc to 0x0fe, runs a zeroed word, advances 2
+        assert.equal(cpu.pc, 0x100);
+    });
+});
+
+test("skip opcodes advance pc correctly through step()", (t) => {
+    // Program: [skip opcode at 0x200, 0x60AA marker at 0x202]. The skip
+    // opcode is stepped once (pcAfterSkip), then the marker is stepped too,
+    // so a fall-through actually executes it. A taken skip jumps over the
+    // marker (V0 stays as set), a fall-through runs it (V0 becomes 0xaa).
+    function runSkip(skipOpcode, v0, v1) {
+        var cpu = makeCpu();
+        cpu.V[0] = v0;
+        cpu.V[1] = v1;
+        loadWords(cpu, [skipOpcode, 0x60aa]);
+        cpu.step();
+        var pcAfterSkip = cpu.pc;
+        if (pcAfterSkip === 0x202)
+            cpu.step(); // execute the marker
+        return { cpu: cpu, pcAfterSkip: pcAfterSkip };
+    }
+
+    t.test("3XNN skips when VX equals NN", () => {
+        var r = runSkip(0x3005, 5, 0);
+        assert.equal(r.pcAfterSkip, 0x204);
+        assert.equal(r.cpu.V[0], 5);
+    });
+
+    t.test("3XNN falls through when VX differs", () => {
+        var r = runSkip(0x3005, 4, 0);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+
+    t.test("4XNN skips when VX differs", () => {
+        var r = runSkip(0x4005, 4, 0);
+        assert.equal(r.pcAfterSkip, 0x204);
+        assert.equal(r.cpu.V[0], 4);
+    });
+
+    t.test("4XNN falls through when VX equals", () => {
+        var r = runSkip(0x4005, 5, 0);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+
+    t.test("5XY0 skips when VX equals VY", () => {
+        var r = runSkip(0x5010, 3, 3);
+        assert.equal(r.pcAfterSkip, 0x204);
+        assert.equal(r.cpu.V[0], 3);
+    });
+
+    t.test("5XY0 falls through when VX differs from VY", () => {
+        var r = runSkip(0x5010, 2, 3);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+
+    t.test("5XYn only skips for n == 0", () => {
+        var r = runSkip(0x5013, 3, 3);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+
+    t.test("9XY0 skips when VX differs from VY", () => {
+        var r = runSkip(0x9010, 2, 3);
+        assert.equal(r.pcAfterSkip, 0x204);
+        assert.equal(r.cpu.V[0], 2);
+    });
+
+    t.test("9XY0 falls through when VX equals VY", () => {
+        var r = runSkip(0x9010, 3, 3);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+
+    t.test("9XYn currently skips for n != 0 as well (pins pre-existing divergence from spec)", () => {
+        var r = runSkip(0x9013, 2, 3);
+        assert.equal(r.pcAfterSkip, 0x204);
+    });
+});
+
+test("6XNN / 7XNN", (t) => {
+    t.test("6XNN sets VX", () => {
+        var cpu = makeCpu();
+        cpu.run(0x65ff);
+        assert.equal(cpu.V[5], 0xff);
+    });
+
+    t.test("7XNN adds NN and wraps at 0xff", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 0xff;
+        cpu.run(0x7001);
+        assert.equal(cpu.V[0], 0x00);
+        cpu.V[0] = 0x10;
+        cpu.run(0x7020);
+        assert.equal(cpu.V[0], 0x30);
+    });
+});
+
+test("8XYn arithmetic and bitwise ops", (t) => {
+    t.test("8XY0 assigns VY to VX", () => {
+        var cpu = makeCpu();
+        cpu.V[2] = 0x2a;
+        cpu.run(0x8120);
+        assert.equal(cpu.V[1], 0x2a);
+    });
+
+    t.test("8XY1 OR", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0xf0;
+        cpu.V[2] = 0x0f;
+        cpu.run(0x8121);
+        assert.equal(cpu.V[1], 0xff);
+    });
+
+    t.test("8XY2 AND", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0xf0;
+        cpu.V[2] = 0x0f;
+        cpu.run(0x8122);
+        assert.equal(cpu.V[1], 0x00);
+    });
+
+    t.test("8XY3 XOR", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0xf0;
+        cpu.V[2] = 0x0f;
+        cpu.run(0x8123);
+        assert.equal(cpu.V[1], 0xff);
+    });
+
+    t.test("8XY4 ADD sets VF on carry", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0xff;
+        cpu.V[2] = 0x01;
+        cpu.run(0x8124);
+        assert.equal(cpu.V[1], 0x00);
+        assert.equal(cpu.V[0xf], 1);
+        cpu.V[1] = 0x10;
+        cpu.V[2] = 0x20;
+        cpu.V[0xf] = 0;
+        cpu.run(0x8124);
+        assert.equal(cpu.V[1], 0x30);
+        assert.equal(cpu.V[0xf], 0);
+    });
+
+    t.test("8XY5 SUB sets VF when there is no borrow", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0x05;
+        cpu.V[2] = 0x07;
+        cpu.run(0x8125);
+        assert.equal(cpu.V[1], 0xfe); // (5 - 7) mod 256
+        assert.equal(cpu.V[0xf], 0);
+        cpu.V[1] = 0x07;
+        cpu.V[2] = 0x05;
+        cpu.run(0x8125);
+        assert.equal(cpu.V[1], 0x02);
+        assert.equal(cpu.V[0xf], 1);
+    });
+
+    t.test("8XY6 SHR shifts right, VF = old LSB", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0x81;
+        cpu.run(0x8106);
+        assert.equal(cpu.V[1], 0x40);
+        assert.equal(cpu.V[0xf], 1);
+        cpu.V[1] = 0x80;
+        cpu.run(0x8106);
+        assert.equal(cpu.V[1], 0x40);
+        assert.equal(cpu.V[0xf], 0);
+    });
+
+    t.test("8XY7 SUBN computes VY - VX", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0x05;
+        cpu.V[2] = 0x07;
+        cpu.run(0x8127);
+        assert.equal(cpu.V[1], 0x2);
+        assert.equal(cpu.V[0xf], 1);
+        cpu.V[1] = 0x07;
+        cpu.V[2] = 0x05;
+        cpu.run(0x8127);
+        assert.equal(cpu.V[1], 0xfe); // (5 - 7) mod 256
+        assert.equal(cpu.V[0xf], 0);
+    });
+
+    t.test("8XYE SHL shifts left, VF = old MSB", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0x80;
+        cpu.run(0x810e);
+        assert.equal(cpu.V[1], 0x00);
+        assert.equal(cpu.V[0xf], 1);
+        cpu.V[1] = 0x7f;
+        cpu.run(0x810e);
+        assert.equal(cpu.V[1], 0xfe);
+        assert.equal(cpu.V[0xf], 0);
+    });
+
+    t.test("unknown 8XYn leaves state alone and advances pc", () => {
+        var cpu = makeCpu();
+        cpu.V[1] = 0x11;
+        loadWords(cpu, [0x8128, 0x6001]);
+        var line = cpu.step();
+        assert.equal(line, "200:8128 !!! Unknown op code !!!");
+        assert.equal(cpu.V[1], 0x11);
+        assert.equal(cpu.pc, 0x202);
+        cpu.step();
+        assert.equal(cpu.V[0], 1);
+    });
+});
+
+test("ANNN / CXNN", (t) => {
+    t.test("ANNN sets I", () => {
+        var cpu = makeCpu();
+        cpu.run(0xa250);
+        assert.equal(cpu.I, 0x250);
+    });
+
+    t.test("CXNN ANDs a random byte with NN", () => {
+        var cpu = makeCpu();
+        withRandom(0.5, function () {
+            cpu.run(0xc0ff); // floor(0.5 * 256) = 128
+            assert.equal(cpu.V[0], 128);
+        });
+        withRandom(0.999999, function () {
+            cpu.run(0xc00f); // floor(0.999999 * 256) = 255
+            assert.equal(cpu.V[0], 255 & 0x0f);
+        });
+        withRandom(0, function () {
+            cpu.run(0xc0ff);
+            assert.equal(cpu.V[0], 0);
+        });
+    });
+});
+
+test("DXYN draws sprites", (t) => {
+    t.test("toggles pixels and sets VF on collision", () => {
+        var cpu = makeCpu();
+        cpu.I = 0x300;
+        cpu.memory[0x300] = 0x80;
+        cpu.run(0xd011);
+        assert.equal(cpu.screen[0], 1);
+        assert.equal(cpu.V[0xf], 0);
+        cpu.run(0xd011);
+        assert.equal(cpu.screen[0], 0);
+        assert.equal(cpu.V[0xf], 1);
+    });
+
+    t.test("wraps around screen edges", () => {
+        var cpu = makeCpu();
+        cpu.I = 0x300;
+        cpu.memory[0x300] = 0x01; // right-most bit, col 7
+        cpu.V[0] = 63;
+        cpu.V[1] = 31;
+        cpu.run(0xd011);
+        assert.equal(cpu.screen[31 * 64 + (63 + 7) % 64], 1);
+    });
+
+    t.test("draws multi-row sprites from I", () => {
+        var cpu = makeCpu();
+        cpu.I = 0x300;
+        cpu.memory[0x300] = 0x80;
+        cpu.memory[0x301] = 0x20;
+        cpu.run(0xd012);
+        assert.equal(cpu.screen[0 * 64 + 0], 1);
+        assert.equal(cpu.screen[1 * 64 + 2], 1);
+        assert.equal(cpu.V[0xf], 0);
+    });
+});
+
+test("EX9E / EXA1 key skips", (t) => {
+    function runKeySkip(opcode, pressed) {
+        var cpu = makeCpu();
+        cpu.V[0] = 0x0a;
+        if (pressed)
+            cpu.keyDown("A");
+        loadWords(cpu, [opcode, 0x60aa]);
+        cpu.step();
+        var pcAfterSkip = cpu.pc;
+        if (pcAfterSkip === 0x202)
+            cpu.step(); // execute the marker
+        return { cpu: cpu, pcAfterSkip: pcAfterSkip };
+    }
+
+    t.test("EX9E skips when key in VX is pressed", () => {
+        var r = runKeySkip(0xe09e, true);
+        assert.equal(r.pcAfterSkip, 0x204);
+        assert.equal(r.cpu.V[0], 0x0a);
+    });
+
+    t.test("EX9E falls through when key is not pressed", () => {
+        var r = runKeySkip(0xe09e, false);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+
+    t.test("EXA1 skips when key in VX is not pressed", () => {
+        var r = runKeySkip(0xe0a1, false);
+        assert.equal(r.pcAfterSkip, 0x204);
+        assert.equal(r.cpu.V[0], 0x0a);
+    });
+
+    t.test("EXA1 falls through when key is pressed", () => {
+        var r = runKeySkip(0xe0a1, true);
+        assert.equal(r.pcAfterSkip, 0x202);
+        assert.equal(r.cpu.V[0], 0xaa);
+    });
+});
+
+test("FXNN extended ops", (t) => {
+    t.test("FX07 reads the delay timer", () => {
+        var cpu = makeCpu();
+        cpu.delayTimer = 5;
+        cpu.run(0xf007);
+        assert.equal(cpu.V[0], 5);
+    });
+
+    t.test("FX0A waits for a key press into VX", () => {
+        var cpu = makeCpu();
+        var line = cpu.run(0xf10a);
+        assert.equal(cpu.waitingForKey, true);
+        assert.equal(cpu.keyTarget, 1);
+        assert.ok(line.indexOf("Waits for a key press") !== -1);
+        var msg = cpu.keyDown("C");
+        assert.equal(cpu.V[1], 0x0c);
+        assert.equal(cpu.waitingForKey, false);
+        assert.ok(msg.indexOf("Key wait: V1 = c") !== -1);
+    });
+
+    t.test("FX15 / FX18 set timers, tickTimers decrements them", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 7;
+        cpu.run(0xf015);
+        assert.equal(cpu.delayTimer, 7);
+        cpu.V[0] = 3;
+        cpu.run(0xf018);
+        assert.equal(cpu.soundTimer, 3);
+        cpu.tickTimers();
+        assert.equal(cpu.delayTimer, 6);
+        assert.equal(cpu.soundTimer, 2);
+    });
+
+    t.test("timers never go below zero", () => {
+        var cpu = makeCpu();
+        cpu.tickTimers();
+        assert.equal(cpu.delayTimer, 0);
+        assert.equal(cpu.soundTimer, 0);
+    });
+
+    t.test("FX1E adds VX to I and wraps at 0xfff", () => {
+        var cpu = makeCpu();
+        cpu.I = 0xffe;
+        cpu.V[0] = 3;
+        cpu.run(0xf01e);
+        assert.equal(cpu.I, 0x001);
+    });
+
+    t.test("FX29 points I at the font sprite of the low nibble of VX", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 0x0a;
+        cpu.run(0xf029);
+        assert.equal(cpu.I, 0x5a);
+        cpu.V[0] = 0x1a;
+        cpu.run(0xf029);
+        assert.equal(cpu.I, 0x5a);
+    });
+
+    t.test("FX33 stores the BCD of VX at I", () => {
+        var cpu = makeCpu();
+        cpu.I = 0x300;
+        cpu.V[0] = 0;
+        cpu.run(0xf033);
+        assert.deepEqual([cpu.memory[0x300], cpu.memory[0x301], cpu.memory[0x302]], [0, 0, 0]);
+        cpu.V[0] = 5;
+        cpu.run(0xf033);
+        assert.deepEqual([cpu.memory[0x300], cpu.memory[0x301], cpu.memory[0x302]], [0, 0, 5]);
+        cpu.V[0] = 255;
+        cpu.run(0xf033);
+        assert.deepEqual([cpu.memory[0x300], cpu.memory[0x301], cpu.memory[0x302]], [2, 5, 5]);
+    });
+
+    t.test("FX55 / FX65 store and restore registers", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 1;
+        cpu.V[1] = 2;
+        cpu.V[2] = 3;
+        cpu.I = 0x300;
+        cpu.run(0xf255);
+        assert.deepEqual([cpu.memory[0x300], cpu.memory[0x301], cpu.memory[0x302]], [1, 2, 3]);
+        // wipe the registers, then restore them from memory
+        cpu.V[0] = 0;
+        cpu.V[1] = 0;
+        cpu.V[2] = 0;
+        cpu.run(0xf265);
+        assert.deepEqual([cpu.V[0], cpu.V[1], cpu.V[2]], [1, 2, 3]);
+    });
+
+    t.test("unknown FXNN is reported", () => {
+        var cpu = makeCpu();
+        assert.equal(cpu.run(0xf000), "!!! Unknown op code !!!");
+    });
+});
+
+test("keyDown / keyUp / isKeyPressed", (t) => {
+    t.test("tracks pressed keys by hex name", () => {
+        var cpu = makeCpu();
+        assert.equal(cpu.isKeyPressed(0x0a), false);
+        cpu.keyDown("A");
+        assert.equal(cpu.isKeyPressed(0x0a), true);
+        cpu.keyUp("A");
+        assert.equal(cpu.isKeyPressed(0x0a), false);
+    });
+
+    t.test("returns null for ordinary key presses", () => {
+        var cpu = makeCpu();
+        assert.equal(cpu.keyDown("1"), null);
+    });
+});
+
+test("step() mechanics", (t) => {
+    t.test("executes one opcode and advances pc by 2", () => {
+        var cpu = makeCpu();
+        loadWords(cpu, [0x6001]);
+        var line = cpu.step();
+        assert.equal(line, "200:6001 Sets V0 to 1");
+        assert.equal(cpu.V[0], 1);
+        assert.equal(cpu.pc, 0x202);
+    });
+
+    t.test("masks pc to 12 bits", () => {
+        var cpu = makeCpu();
+        setWord(cpu, 0x200, 0x6002);
+        cpu.pc = 0x1200;
+        var line = cpu.step();
+        assert.ok(line.indexOf("200:6002") === 0);
+        assert.equal(cpu.V[0], 2);
+    });
+
+    t.test("resets and reports when pc is not a number", () => {
+        var cpu = makeCpu();
+        cpu.V[0] = 9;
+        cpu.screen[5] = 1;
+        cpu.pc = NaN;
+        var line = cpu.step();
+        assert.ok(line.indexOf("!!! Fatal") === 0);
+        assert.equal(cpu.pc, 0x200);
+        assert.equal(cpu.V[0], 0);
+        assert.equal(screenPixels(cpu), 0);
+    });
+});
+
+test("integration: runs maze1.ch8 from the roms directory to its end loop", () => {
+    var original = Math.random;
+    Math.random = function () { return 0.5; }; // V2 = 128 & 1 = 0 -> deterministic
+    try {
+        var cpu = makeCpu();
+        cpu.loadRom(roms.loadRomFile('maze1.ch8'));
+        for (var i = 0; i < 1100; i++) {
+            cpu.tickTimers();
+            cpu.step();
+        }
+        assert.equal(cpu.pc, 0x21c); // designed self-loop at end of program
+        assert.equal(cpu.V[1], 0x20);
+        // 16 tiles x 8 rows x 4 pixels with no overlaps -> exact count
+        assert.equal(screenPixels(cpu), 512);
+        assert.equal(cpu.screen[0], 1);
+        assert.equal(cpu.screen[31 * 64 + 63], 1);
+    } finally {
+        Math.random = original;
+    }
+});

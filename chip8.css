@@ -3,8 +3,28 @@ canvas#output {
 	height:320px;
 	background-color:#000;
 	color:#fff;
+	-moz-image-rendering: -moz-crisp-edges;
+	image-rendering: pixelated;
 }
 
 p#log {
 	font-family: "Lucida Console", Monaco, monospace;
+}
+
+p#controls {
+	margin: 8px 0;
+}
+
+p#controls select,
+p#controls button {
+	font-family: "Lucida Console", Monaco, monospace;
+	font-size: 14px;
+	margin-right: 8px;
+	padding: 4px 12px;
+	cursor: pointer;
+}
+
+p#controls button:disabled {
+	color: #999;
+	cursor: default;
 }

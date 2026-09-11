@@ -1,0 +1,9 @@
+{
+  "name": "chip8-emu",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chip-8 emulator in JavaScript",
+  "scripts": {
+    "test": "node --test"
+  }
+}
