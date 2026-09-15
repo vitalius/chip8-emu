@@ -128,6 +128,12 @@ function debug(t) {
 canvas = document.getElementById("output");
 ctx = canvas.getContext("2d");
 
+function setUrlParam(name, value) {
+    var url = new URL(window.location);
+    url.searchParams.set(name, value);
+    history.replaceState(null, "", url);
+}
+
 var romSelect = document.getElementById("rom-select");
 var i;
 for (i = 0; i < ROMS.length; i++) {
@@ -136,9 +142,14 @@ for (i = 0; i < ROMS.length; i++) {
     opt.textContent = ROMS[i];
     romSelect.appendChild(opt);
 }
-romSelect.value = DEFAULT_ROM;
+var romParam = new URLSearchParams(window.location.search).get('rom');
+var initialRom = ROMS.indexOf(romParam) !== -1 ? romParam : DEFAULT_ROM;
+if (romParam !== null && initialRom !== romParam)
+    log("Unknown rom: " + romParam + " — using " + initialRom);
+romSelect.value = initialRom;
 romSelect.addEventListener("change", function () {
     loadRom(romSelect.value);
+    setUrlParam('rom', romSelect.value);
 });
 
 var speedSelect = document.getElementById("speed-select");
@@ -148,10 +159,17 @@ for (i = 0; i < SPEEDS.length; i++) {
     sOpt.textContent = SPEEDS[i] + "x";
     speedSelect.appendChild(sOpt);
 }
+var speedParam = parseInt(new URLSearchParams(window.location.search).get('speed'), 10);
+var initialSpeed = SPEEDS.indexOf(speedParam) !== -1 ? speedParam : speed;
+if (!isNaN(speedParam) && initialSpeed !== speedParam)
+    log("Unknown speed: " + speedParam + " — using " + initialSpeed + "x");
+speed = initialSpeed;
+stepMs = baseStepMs / speed;
 speedSelect.value = String(speed);
 speedSelect.addEventListener("change", function () {
     speed = parseInt(speedSelect.value, 10);
     stepMs = baseStepMs / speed;
+    setUrlParam('speed', String(speed));
 });
 
 document.getElementById("btn-run").addEventListener("click", doRun);
@@ -162,5 +180,5 @@ document.addEventListener("keydown", keyDown);
 document.addEventListener("keyup", keyUp);
 lastTime = performance.now();
 updateButtons();
-loadRom(DEFAULT_ROM);
+loadRom(initialRom);
 requestAnimationFrame(frame);

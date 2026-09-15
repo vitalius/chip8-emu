@@ -1,7 +1,7 @@
 // Loads Chip-8 ROM files from the roms/ directory as byte arrays
 // (big-endian) for loading at 0x200.
 
-var ROMS = [ 'maze1.ch8', 'maze2.ch8', 'particle.ch8', 'sierpinski.ch8', 'space-inv.ch8', 'cave.ch8', 'brick.ch8', 'airplane.ch8'];
+var ROMS = [ 'maze1.ch8', 'maze2.ch8', 'particle.ch8', 'sierpinski.ch8', 'space-inv.ch8', 'cave.ch8', 'brick.ch8', 'airplane.ch8','tank.ch8','puzzle.ch8','tron.ch8'];
 var DEFAULT_ROM = 'maze1.ch8';
 
 var loadRomFile;

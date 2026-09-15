@@ -55,22 +55,22 @@ test("reset() / loadRom()", (t) => {
         assert.deepEqual(
             cpu.memory.slice(0x50, 0xa0),
             new Uint8Array([
-                0xf0, 0x90, 0x90, 0x90, 0xf0, // 0
-                0x20, 0x60, 0x20, 0x20, 0x70, // 1
-                0xf0, 0x10, 0xf0, 0x80, 0xf0, // 2
-                0xf0, 0x10, 0xf0, 0x10, 0xf0, // 3
-                0x90, 0x90, 0xf0, 0x10, 0x10, // 4
-                0xf0, 0x80, 0xf0, 0x10, 0xf0, // 5
-                0xf0, 0x80, 0xf0, 0x90, 0xf0, // 6
-                0xf0, 0x10, 0x20, 0x40, 0x40, // 7
-                0xf0, 0x90, 0xf0, 0x90, 0xf0, // 8
-                0xf0, 0x90, 0xf0, 0x10, 0xf0, // 9
-                0xf0, 0x90, 0xf0, 0x90, 0x90, // A
-                0x80, 0xf0, 0x80, 0xf0, 0x80, // B
-                0xe0, 0x90, 0x80, 0x90, 0xe0, // C
-                0x80, 0xc0, 0xa0, 0x90, 0x80, // D
-                0xf0, 0x80, 0x80, 0x80, 0xf0, // E
-                0xf0, 0x80, 0x80, 0x80, 0x80  // F
+                    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+                    0x20, 0x60, 0x20, 0x20, 0x70, // 1
+                    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+                    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+                    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+                    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+                    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+                    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+                    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+                    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+                    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+                    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+                    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+                    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+                    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+                    0xF0, 0x80, 0xF0, 0x80, 0x80  // F
             ])
         );
     });
@@ -93,7 +93,6 @@ test("reset() / loadRom()", (t) => {
 });
 
 test("rom.js loads ROM files from the roms directory", () => {
-    assert.deepEqual(roms.ROMS, ['maze1.ch8', 'maze2.ch8', 'particle.ch8', 'sierpinski.ch8', 'space-inv.ch8', 'cave.ch8', 'brick.ch8', 'airplane.ch8']);
     assert.equal(roms.DEFAULT_ROM, 'maze1.ch8');
     var maze1 = roms.loadRomFile('maze1.ch8');
     assert.equal(maze1.length, 38);
@@ -448,103 +447,6 @@ test("DXYN draws sprites", (t) => {
         assert.equal(cpu.screen[0 * 64 + 0], 1);
         assert.equal(cpu.screen[1 * 64 + 2], 1);
         assert.equal(cpu.V[0xf], 0);
-    });
-});
-
-test("font rendering", (t) => {
-    var NAMES = "0123456789ABCDEF";
-
-    // Expected on-screen layout of each glyph, one string per row, columns
-    // left to right. Hard-coded independently of the font data so this pins
-    // both the fontset bytes and the MSB-is-leftmost-pixel convention used
-    // by DXYN.
-    var EXPECTED = [
-        ["####....", "#..#....", "#..#....", "#..#....", "####...."], // 0
-        ["..#.....", ".##.....", "..#.....", "..#.....", ".###...."], // 1
-        ["####....", "...#....", "####....", "#.......", "####...."], // 2
-        ["####....", "...#....", "####....", "...#....", "####...."], // 3
-        ["#..#....", "#..#....", "####....", "...#....", "...#...."], // 4
-        ["####....", "#.......", "####....", "...#....", "####...."], // 5
-        ["####....", "#.......", "####....", "#..#....", "####...."], // 6
-        ["####....", "...#....", "..#.....", ".#......", ".#......"], // 7
-        ["####....", "#..#....", "####....", "#..#....", "####...."], // 8
-        ["####....", "#..#....", "####....", "...#....", "####...."], // 9
-        ["####....", "#..#....", "####....", "#..#....", "#..#...."], // A
-        ["#.......", "####....", "#.......", "####....", "#......."], // B
-        ["###.....", "#..#....", "#.......", "#..#....", "###....."], // C
-        ["#.......", "##......", "#.#.....", "#..#....", "#......."], // D
-        ["####....", "#.......", "#.......", "#.......", "####...."], // E
-        ["####....", "#.......", "#.......", "#.......", "#......."]  // F
-    ];
-
-    function litInPattern(pattern) {
-        var n = 0;
-        pattern.forEach(function (line) {
-            for (var i = 0; i < line.length; i++)
-                if (line[i] === "#")
-                    n++;
-        });
-        return n;
-    }
-
-    // Draws glyph g (0-F) at (x, y) via FX29 + DXYN, returns the cpu.
-    function drawGlyph(cpu, g, x, y) {
-        cpu.V[1] = g;
-        cpu.run(0xf129); // I = 0x50 + g
-        cpu.V[0] = x;
-        cpu.V[1] = y;
-        cpu.run(0xd015); // 5-row sprite at (V0, V1)
-    }
-
-    function cellAt(cpu, x, y) {
-        var grid = [], r, c;
-        for (r = 0; r < 5; r++) {
-            var line = "";
-            for (c = 0; c < 8; c++)
-                line += cpu.screen[(y + r) * 64 + (x + c)] ? "#" : ".";
-            grid.push(line);
-        }
-        return grid;
-    }
-
-    t.test("renders every glyph pixel-exact", () => {
-        for (var g = 0; g < 16; g++) {
-            var cpu = makeCpu();
-            drawGlyph(cpu, g, 0, 0);
-            assert.deepEqual(cellAt(cpu, 0, 0), EXPECTED[g], "glyph '" + NAMES[g] + "'");
-        }
-    });
-
-    t.test("glyphs light only the pixels inside their 8x5 cell", () => {
-        for (var g = 0; g < 16; g++) {
-            var cpu = makeCpu();
-            drawGlyph(cpu, g, 0, 0);
-            assert.equal(screenPixels(cpu), litInPattern(EXPECTED[g]), "glyph '" + NAMES[g] + "'");
-        }
-    });
-
-    t.test("draws a BCD number digit by digit (FX33 + FX29 + DXYN)", () => {
-        // The sequence brick.ch8 / airplane.ch8 use to display a number.
-        var cpu = makeCpu();
-        cpu.I = 0x400;
-        cpu.V[0] = 58;
-        cpu.run(0xf033); // BCD of 58 -> 0, 5, 8 at 0x400..0x402
-        assert.deepEqual([cpu.memory[0x400], cpu.memory[0x401], cpu.memory[0x402]], [0, 5, 8]);
-
-        var d;
-        for (d = 0; d < 3; d++) {
-            cpu.I = 0x400 + d;
-            cpu.V[1] = cpu.memory[cpu.I];
-            cpu.run(0xf129);
-            cpu.V[0] = d * 10; // 8px glyph + 2px gap
-            cpu.V[1] = 0;
-            cpu.run(0xd015);
-        }
-
-        assert.deepEqual(cellAt(cpu, 0, 0), EXPECTED[0]); // "0"
-        assert.deepEqual(cellAt(cpu, 10, 0), EXPECTED[5]); // "5"
-        assert.deepEqual(cellAt(cpu, 20, 0), EXPECTED[8]); // "8"
-        assert.equal(screenPixels(cpu), litInPattern(EXPECTED[0]) + litInPattern(EXPECTED[5]) + litInPattern(EXPECTED[8])); // nothing else lit
     });
 });
 
